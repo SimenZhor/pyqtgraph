@@ -88,8 +88,17 @@ class PColorMeshItem(GraphicsObject):
         colorMap : pyqtgraph.ColorMap
             Colormap used to map the z value to colors.
             default ``pyqtgraph.colormap.get('viridis')``
-        limits: tuple, optional, default None
-            Limits the colormap range to (low, high), None disables the limit.
+        levels: tuple, optional, default None
+            Sets the minimum and maximum values to be represented by the colormap (min, max). 
+            Values outside this range will be clipped to the colors representing min or max.
+            ``None`` disables the limits, meaning that the colormap will autoscale 
+            each time ``setData()`` is called - unless ``enableAutoLevels=False``.
+        enableAutoLevels: bool, optional, default True
+            Causes the colormap levels to autoscale whenever ``setData()`` is called. 
+            When enableAutoLevels is set to True, it is still possible to disable autoscaling
+            on a per-change-basis by using ``autoLevels=False`` when calling ``setData()``.
+            If ``enableAutoLevels==False`` and ``levels==None``, autoscaling will be 
+            performed once when the first z data is supplied. 
         edgecolors : dict, optional
             The color of the edges of the polygons.
             Default None means no edges.
@@ -109,7 +118,8 @@ class PColorMeshItem(GraphicsObject):
 
         self.edgecolors = kwargs.get('edgecolors', None)
         self.antialiasing = kwargs.get('antialiasing', False)
-        self.cmaplim = kwargs.get('limits', None)
+        self.levels = kwargs.get('levels', None)
+        self.enableAutoLevels = kwargs.get('enableAutoLevels', True)
         
         if 'colorMap' in kwargs:
             cmap = kwargs.get('colorMap')
@@ -181,7 +191,7 @@ class PColorMeshItem(GraphicsObject):
             ValueError('Data must been sent as (z) or (x, y, z)')
 
 
-    def setData(self, *args):
+    def setData(self, *args, **kwargs):
         """
         Set the data to be drawn.
 
@@ -203,7 +213,13 @@ class PColorMeshItem(GraphicsObject):
 
             "ASCII from: <https://matplotlib.org/3.2.1/api/_as_gen/
                          matplotlib.pyplot.pcolormesh.html>".
+        autoLevels: bool, optional, default True
+            When set to True, PColorMeshItem will automatically select levels
+            based on the minimum and maximum values encountered in the data along the z axis.
+            The minimum and maximum levels are mapped to the lowest and highest colors 
+            in the colormap. The autoLevels parameter is ignored if ``enableAutoLevels is False`` 
         """
+        autoLevels = kwargs.get('autoLevels', True)
 
         # Has the view bounds changed
         shapeChanged = False
@@ -216,8 +232,15 @@ class PColorMeshItem(GraphicsObject):
             if np.any(self.x != args[0]) or np.any(self.y != args[1]):
                 shapeChanged = True
 
-        # Prepare data
-        self._prepareData(args)
+        if len(args)==0:
+            # No data was received.
+            if self.z is None:
+                # No data is currently displayed, 
+                # so other settings (like colormap) can not be updated
+                return
+        else:
+            # Got new data. Prepare it for plotting
+            self._prepareData(args)
 
 
         self.qpicture = QtGui.QPicture()
@@ -236,14 +259,17 @@ class PColorMeshItem(GraphicsObject):
         lut = self.lut_qbrush
         # Second we associate each z value, that we normalize, to the lut
         scale = len(lut) - 1
-        if self.cmaplim is None:
-            # Autoscale colormap each time setData is called
+        # Decide whether to autoscale the colormap or use the same levels as before
+        if (self.levels is None) or (self.enableAutoLevels and autoLevels):
+            # Autoscale colormap 
             z_min = self.z.min()
             z_max = self.z.max()
+            if not self.enableAutoLevels:
+                self.levels = (z_min, z_max)
         else:
             # Use consistent colormap scaling
-            z_min = self.cmaplim[0]
-            z_max = self.cmaplim[1]
+            z_min = self.levels[0]
+            z_max = self.levels[1]
         rng = z_max - z_min
         if rng == 0:
             rng = 1
@@ -279,12 +305,82 @@ class PColorMeshItem(GraphicsObject):
 
 
 
+    def updateImage(self, *args, **kargs):
+        ## Used for re-rendering mesh from self.z.
+        ## For example when a new colormap is applied, or the levels are adjusted
+
+        defaults = {
+            'autoLevels': False,
+        }
+        defaults.update(kargs)
+        return self.setData(*args, **defaults)
+
+
+
+    def setLevels(self, levels, update=True):
+        """
+        Sets image scaling levels. 
+        See :func:`makeARGB <pyqtgraph.makeARGB>` for more details on how levels are applied.
+        
+        Parameters
+        ----------
+            levels: array_like
+                - ``[blackLevel, whiteLevel]`` 
+                    sets black and white levels for monochrome data and can be used with a lookup table.
+                - ``[[minR, maxR], [minG, maxG], [minB, maxB]]``
+                    sets individual scaling for RGB values. Not compatible with lookup tables.
+            update: bool, optional
+                Controls if image immediately updates to reflect the new levels.
+        """
+        # if self._xp is None:
+        #     self.levels = levels
+        #     self._defferedLevels = levels
+        #     return
+        # if levels is not None:
+        #     levels = self._xp.asarray(levels)
+        self.levels = levels
+        # self._effectiveLut = None
+        if update:
+            self.updateImage()
+
+
+
+    def getLevels(self):
+        """
+        Returns the list representing the current level settings. See :func:`~setLevels`.
+        When ``autoLevels`` is active, the format is ``[blackLevel, whiteLevel]``.
+        """
+        return self.levels
+
+
+    
+    def setLookupTable(self, lut, update=True):
+        if lut is not self.lut_qbrush:
+            # if self._xp is not None:
+            #     lut = self._ensure_proper_substrate(lut, self._xp)
+            self.lut_qbrush = [QtGui.QBrush(x) for x in lut]
+            # self.lut = lut
+            # self._effectiveLut = None
+            if update:
+                self.updateImage()
+
+
+
+    def disableAutoLevels(self):
+        self.enableAutoLevels = False
+
+
+
+    def enableAutoLevels(self):
+        self.enableAutoLevels = True
+
+
+
     def paint(self, p, *args):
         if self.z is None:
             return
 
         p.drawPicture(0, 0, self.qpicture)
-
 
 
     def setBorder(self, b):
@@ -304,7 +400,6 @@ class PColorMeshItem(GraphicsObject):
         if self.y is None:
             return None
         return np.max(self.y)
-
 
 
 

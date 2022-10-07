@@ -45,15 +45,27 @@ z = np.exp(-(x*xn)**2/1000)[:-1,:-1]
 edgecolors   = None
 antialiasing = False
 cmap         = pg.colormap.get('viridis')
-limits       = None
+levels       = (-2,2) # Will be overwritten unless enableAutoLevels is set to False
+enableAutoLevels = True 
 # edgecolors = {'color':'w', 'width':2} # May be uncommented to see edgecolor effect
 # antialiasing = True # May be uncommented to see antialiasing effect
 # cmap         = pg.colormap.get('plasma') # May be uncommented to see a different colormap than the default 'viridis'
-# limits       = (-2,2) # may be uncommented to see changes in the absolute value of z (color_noise) which is hidden by the autoscaling colormap when using the default `limits=None`
-pcmi = pg.PColorMeshItem(edgecolors=edgecolors, antialiasing=antialiasing, colorMap=cmap, limits=limits)
+# enableAutoLevels = False # may be uncommented to see changes in the absolute value of z (color_noise) which is hidden by the autoscaling colormap when using the default `levels=None`
+pcmi = pg.PColorMeshItem(edgecolors=edgecolors, antialiasing=antialiasing, colorMap=cmap, levels=levels, enableAutoLevels=enableAutoLevels)
 view.addItem(pcmi)
 textitem = pg.TextItem(anchor=(1, 0))
 view.addItem(textitem)
+
+# Add colorbar
+bar = pg.ColorBarItem(
+    label = "Z value [arbitrary unit]",
+    # values = levels,
+    # limits = (-30_000, 30_000), 
+    rounding=0.1,
+    interactive=False,
+    colorMap=cmap )
+bar.setImageItem( [pcmi] )
+win.addItem(bar)
 
 
 ## Set the animation
